@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14213d"><meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png">
+<title>Portfolio refresh</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#f4f5f7;color:#1b1f24;padding-bottom:env(safe-area-inset-bottom)}
+header{background:#14213d;color:#fff;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:17px;margin:0}header button{background:none;border:1px solid #fff5;color:#fff;padding:6px 10px;font-size:13px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px 6px}
+button{border:0;border-radius:8px;padding:14px 8px;font-size:15px;font-weight:600;background:#14213d;color:#fff}
+button.sec{background:#e3e7ee;color:#14213d;font-size:13px;padding:10px 6px}button:disabled{opacity:.4}
+.opt{padding:6px 16px;font-size:13px;color:#445;display:flex;gap:8px;align-items:flex-start}.opt input{margin-top:2px;width:18px;height:18px}
+#status{margin:8px 16px;padding:10px 12px;border-radius:8px;background:#fff;font-size:14px;line-height:1.4}
+#status.err{background:#fdeaea;color:#a40000}#status.ok{background:#e7f6ec;color:#14532d}#status.warn{background:#fff4d6;color:#6b4a00}
+#view{margin:0 16px 16px}iframe{width:100%;height:78vh;border:0;background:#fff;border-radius:8px}
+pre{margin:0;padding:14px;background:#fff;border-radius:8px;white-space:pre-wrap;word-break:break-word;font:14px/1.5 ui-monospace,Menlo,monospace}
+#setup{display:none;padding:16px}#setup label{display:block;font-size:13px;margin:12px 0 4px;color:#445}
+#setup input[type=text],#setup input[type=password]{width:100%;padding:12px;font-size:16px;border:1px solid #bcc;border-radius:8px}
+#setup small{display:block;color:#667;margin-top:4px;line-height:1.4}a{color:#14213d}
+</style></head><body>
+<header><h1>Portfolio refresh</h1><button id="gear" onclick="showSetup()">Settings</button></header>
+
+<div id="setup">
+ <label>Private repo (owner/name)</label><input type="text" id="repo" placeholder="owner/repository" autocapitalize="off" autocomplete="off">
+ <label>GitHub token</label><input type="password" id="tok" placeholder="github_pat_..." autocomplete="off">
+ <small>Create a fine-grained token on GitHub (Settings &rarr; Developer settings &rarr; Fine-grained tokens) for that one repo only, expiry 90 days, with <b>Actions: Read and write</b> and <b>Contents: Read-only</b>. It is stored only in this browser. Clearing it here removes it.</small>
+ <div class="btns"><button onclick="saveSetup()">Save</button><button class="sec" onclick="clearSetup()">Remove token</button></div>
+</div>
+
+<div id="main">
+ <div class="btns">
+  <button id="bd" onclick="go('daily')">Refresh daily</button>
+  <button id="bw" onclick="go('weekly')">Refresh weekly</button>
+  <button class="sec" onclick="showLast('daily')">Last daily</button>
+  <button class="sec" onclick="showLast('weekly')">Last weekly</button>
+ </div>
+ <label class="opt"><input type="checkbox" id="send"><span>Also send to Telegram and save history (what the scheduler does). Unticked = test run, nothing sent.</span></label>
+ <div id="status">Ready. A refresh takes a few minutes while GitHub checks the data, fetches prices and builds the report.</div>
+ <div id="view"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const FILES={daily:{wf:'daily-report.yml',file:'latest_daily.html',meta:'latest_daily.json'},
+             weekly:{wf:'weekly-report.yml',file:'latest_weekly.txt',meta:'latest_weekly.json'}};
+let busy=false;
+function cfg(){try{return{repo:localStorage.getItem('repo')||'',tok:localStorage.getItem('tok')||''}}catch(e){return{repo:'',tok:''}}}
+function say(msg,cls){const s=$('status');s.className=cls||'';s.innerHTML=msg}
+function showSetup(){const c=cfg();$('repo').value=c.repo;$('tok').value=c.tok;$('setup').style.display='block';$('main').style.display='none'}
+function saveSetup(){const r=$('repo').value.trim(),t=$('tok').value.trim();
+ if(!/^[\w.-]+\/[\w.-]+$/.test(r)||!t){alert('Enter the repo as owner/name and a token.');return}
+ try{localStorage.setItem('repo',r);localStorage.setItem('tok',t)}catch(e){alert('This browser blocked storage.');return}
+ $('setup').style.display='none';$('main').style.display='block';say('Saved. Ready.')}
+function clearSetup(){try{localStorage.removeItem('tok')}catch(e){}$('tok').value='';say('Token removed.','warn')}
+function setBusy(b){busy=b;['bd','bw'].forEach(i=>$(i).disabled=b)}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+async function gh(path,opt={}){const c=cfg();
+ const r=await fetch('https://api.github.com/repos/'+c.repo+path,{...opt,headers:{Authorization:'Bearer '+c.tok,
+  Accept:opt.raw?'application/vnd.github.raw+json':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(opt.headers||{})}});
+ if(!r.ok){let d='';try{d=(await r.text()).slice(0,200)}catch(e){}
+  const hint=[401,403,404].includes(r.status)?' (check the token: Actions read/write, Contents read, this repo)':'';
+  throw new Error('GitHub '+r.status+hint+' '+d)}
+ if(opt.raw)return r.text();return r.status===204?{}:r.json()}
+
+async function go(kind){
+ const c=cfg();if(!c.repo||!c.tok){showSetup();return}
+ const send=$('send').checked;
+ if(send&&!confirm('This sends the real Telegram message and saves history. Continue?'))return;
+ setBusy(true);$('view').innerHTML='';
+ try{
+  say('Asking GitHub to start a '+(send?'live':'test')+' run...');
+  const branch=(await gh('')).default_branch;
+  const t0=Date.now()-15000;
+  await gh('/actions/workflows/'+FILES[kind].wf+'/dispatches',{method:'POST',body:JSON.stringify({ref:branch,inputs:{dry_run:send?'false':'true'}})});
+  let run=null;
+  for(let i=0;i<25&&!run;i++){await sleep(3000);
+   const l=await gh('/actions/workflows/'+FILES[kind].wf+'/runs?event=workflow_dispatch&per_page=5');
+   run=l.workflow_runs.filter(r=>new Date(r.created_at).getTime()>=t0).sort((a,b)=>b.id-a.id)[0]||null}
+  if(!run)throw new Error('The run was requested but did not appear in GitHub Actions.');
+  const start=Date.now();
+  while(true){
+   run=await gh('/actions/runs/'+run.id);
+   say('GitHub is running it ('+run.status.replace('_',' ')+', '+Math.round((Date.now()-start)/1000)+'s) <a href="'+run.html_url+'" target="_blank" rel="noopener">view</a>');
+   if(run.status==='completed')break;
+   if(Date.now()-start>25*60000)throw new Error('Timed out after 25 minutes. Check the run on GitHub.');
+   await sleep(5000)}
+  if(run.conclusion!=='success'){
+   let why='';try{const j=await gh('/actions/runs/'+run.id+'/jobs');
+    why=j.jobs.flatMap(x=>(x.steps||[]).filter(s=>s.conclusion==='failure').map(s=>x.name+' / '+s.name)).join('; ')}catch(e){}
+   throw new Error('The run did not succeed'+(why?': failed at '+why:'')+'. <a href="'+run.html_url+'" target="_blank" rel="noopener">Open run</a>')}
+  await showLast(kind,run.id);
+ }catch(e){say(String(e.message||e),'err')}
+ setBusy(false)}
+
+async function showLast(kind,expectRun){
+ const c=cfg();if(!c.repo||!c.tok){showSetup();return}
+ try{
+  say('Loading the latest '+kind+' result...');
+  const f=FILES[kind],ref='?ref=app-data&_='+Date.now();
+  const meta=JSON.parse(await gh('/contents/'+f.meta+ref,{raw:true}));
+  if(expectRun&&meta.run_id!==expectRun){say('The run finished but its result is not published yet (the page shows the previous result). Tap "Last '+kind+'" in a minute. <a href="'+meta.run_url+'" target="_blank" rel="noopener">previous run</a>','warn')}
+  const body=await gh('/contents/'+f.file+ref,{raw:true});
+  const when=new Date(meta.finished).toLocaleString();
+  const label=meta.dry_run?'Test run (nothing sent)':'Live run (sent to Telegram)';
+  if(!(expectRun&&meta.run_id!==expectRun))say(label+' &middot; '+kind+' &middot; '+when+' &middot; <a href="'+meta.run_url+'" target="_blank" rel="noopener">run</a>','ok');
+  const v=$('view');v.innerHTML='';
+  if(kind==='daily'){const fr=document.createElement('iframe');fr.setAttribute('sandbox','allow-popups');fr.srcdoc=body;v.appendChild(fr)}
+  else{const t=document.createElement('textarea');t.innerHTML=body.replace(/<\/?[a-z][^>]*>/gi,'');
+   const p=document.createElement('pre');p.textContent=t.value.trim();v.appendChild(p)}
+ }catch(e){say(String(e.message||e)+(String(e.message).includes('404')?' If nothing has run since the update, run a refresh first.':''),'err')}}
+
+if(!cfg().tok)showSetup();
+</script></body></html>
