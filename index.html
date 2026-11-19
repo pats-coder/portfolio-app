@@ -35,6 +35,7 @@ pre{margin:0;padding:14px;background:#fff;border-radius:8px;white-space:pre-wrap
   <button id="bw" onclick="go('weekly')">Refresh weekly</button>
   <button class="sec" onclick="showLast('daily')">Last daily</button>
   <button class="sec" onclick="showLast('weekly')">Last weekly</button>
+  <button class="sec" onclick="showLast('audit')">Last audit</button>
  </div>
  <label class="opt"><input type="checkbox" id="send"><span>Also send to Telegram and save history (what the scheduler does). Unticked = test run, nothing sent.</span></label>
  <div id="status">Ready. A refresh takes a few minutes while GitHub checks the data, fetches prices and builds the report.</div>
@@ -44,7 +45,8 @@ pre{margin:0;padding:14px;background:#fff;border-radius:8px;white-space:pre-wrap
 <script>
 const $=id=>document.getElementById(id);
 const FILES={daily:{wf:'daily-report.yml',file:'latest_daily.html',meta:'latest_daily.json'},
-             weekly:{wf:'weekly-report.yml',file:'latest_weekly.txt',meta:'latest_weekly.json'}};
+             weekly:{wf:'weekly-report.yml',file:'latest_weekly.txt',meta:'latest_weekly.json'},
+             audit:{file:'latest_audit.html',meta:'latest_audit.json'}};
 let busy=false;
 function cfg(){try{return{repo:localStorage.getItem('repo')||'',tok:localStorage.getItem('tok')||''}}catch(e){return{repo:'',tok:''}}}
 const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -108,7 +110,7 @@ async function showLast(kind,expectRun){
   const label=meta.dry_run?'Test run (nothing sent)':'Live run (sent to Telegram)';
   if(!(expectRun&&meta.run_id!==expectRun))say(label+' &middot; '+kind+' &middot; '+when+' &middot; <a href="'+esc(meta.run_url)+'" target="_blank" rel="noopener">run</a>','ok');
   const v=$('view');v.innerHTML='';
-  if(kind==='daily'){const fr=document.createElement('iframe');fr.setAttribute('sandbox','allow-popups');fr.srcdoc=body;v.appendChild(fr)}
+  if(kind==='daily'||kind==='audit'){const fr=document.createElement('iframe');fr.setAttribute('sandbox','allow-popups');fr.srcdoc=body;v.appendChild(fr)}
   else{const t=document.createElement('textarea');t.innerHTML=body.replace(/<\/?[a-z][^>]*>/gi,'');
    const p=document.createElement('pre');p.textContent=t.value.trim();v.appendChild(p)}
  }catch(e){say(String(e.message||e)+(String(e.message).includes('404')?' If nothing has run since the update, run a refresh first.':''),'err')}}
